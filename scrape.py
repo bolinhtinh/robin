@@ -5,6 +5,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict
+from config import LOW_RESOURCE_MODE, LOW_RESOURCE_SCRAPE_MAX_CHARS
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -76,18 +78,19 @@ def scrape_single(url_data, rotate=False, rotate_interval=5, control_port=9051, 
             scraped_text = f"{url_data['title']} - {text}"
         else:
             scraped_text = url_data['title']
-    except Exception as e:
+    except Exception:
         # Return title only on failure, so we don't lose the reference
         scraped_text = url_data['title']
     
     return url, scraped_text
 
-def scrape_multiple(urls_data, max_workers=5):
+def scrape_multiple(urls_data, max_workers=5, max_chars: Optional[int] = None):
     """
     Scrapes multiple URLs concurrently using a thread pool.
     """
     results = {}
-    max_chars = 2000  # Increased limit slightly for better context
+    if max_chars is None:
+        max_chars = LOW_RESOURCE_SCRAPE_MAX_CHARS if LOW_RESOURCE_MODE else 2000
     
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_url = {

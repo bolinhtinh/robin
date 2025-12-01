@@ -5,12 +5,17 @@ from scrape import scrape_multiple
 from search import get_search_results
 from llm_utils import BufferedStreamingHandler, get_model_choices
 from llm import get_llm, refine_query, filter_results, generate_summary
+from config import LOW_RESOURCE_MODE, LOW_RESOURCE_THREADS, LOW_RESOURCE_MAX_ENDPOINTS
 
 
 # Cache expensive backend calls
 @st.cache_data(ttl=200, show_spinner=False)
-def cached_search_results(refined_query: str, threads: int):
-    return get_search_results(refined_query.replace(" ", "+"), max_workers=threads)
+def cached_search_results(refined_query: str, threads: int, max_endpoints: int | None):
+    return get_search_results(
+        refined_query.replace(" ", "+"),
+        max_workers=threads,
+        max_endpoints=max_endpoints,
+    )
 
 
 @st.cache_data(ttl=200, show_spinner=False)
@@ -58,24 +63,39 @@ st.sidebar.markdown(
     """Made by [Apurv Singh Gautam](https://www.linkedin.com/in/apurvsinghgautam/)"""
 )
 st.sidebar.subheader("Settings")
-model_options = get_model_choices()
-default_model_index = (
-    next(
-        (idx for idx, name in enumerate(model_options) if name.lower() == "gpt4o"),
-        0,
-    )
-    if model_options
-    else 0
+low_bandwidth = st.sidebar.checkbox(
+    "Low-bandwidth mode",
+    value=LOW_RESOURCE_MODE,
+    help="Reduces engines, threads, streaming, and summary size for weak networks/CPUs.",
 )
+model_options = get_model_choices()
+# Prefer lightweight defaults when available
+preferred_light = ["gpt-5-nano", "gemini-2.5-flash-lite", "gpt-5-mini"]
+def_idx = 0
+for pref in preferred_light:
+    try:
+        def_idx = next(
+            idx for idx, name in enumerate(model_options) if name.lower() == pref
+        )
+        break
+    except StopIteration:
+        continue
 model = st.sidebar.selectbox(
     "Select LLM Model",
     model_options,
-    index=default_model_index,
+    index=def_idx if model_options else 0,
     key="model_select",
 )
 if any(name not in {"gpt4o", "gpt-4.1", "claude-3-5-sonnet-latest", "llama3.1", "gemini-2.5-flash"} for name in model_options):
     st.sidebar.caption("Locally detected Ollama models are automatically added to this list.")
-threads = st.sidebar.slider("Scraping Threads", 1, 16, 4, key="thread_slider")
+threads = st.sidebar.slider(
+    "Scraping Threads",
+    1,
+    8 if low_bandwidth else 16,
+    LOW_RESOURCE_THREADS if low_bandwidth else 4,
+    key="thread_slider",
+)
+max_endpoints = LOW_RESOURCE_MAX_ENDPOINTS if low_bandwidth else None
 
 
 # Main UI - logo and input
@@ -127,7 +147,7 @@ if run_button and query:
     with status_slot.container():
         with st.spinner("🔍 Searching dark web..."):
             st.session_state.results = cached_search_results(
-                st.session_state.refined, threads
+                st.session_state.refined, threads, max_endpoints
             )
     p2.container(border=True).markdown(
         f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(st.session_state.results)}</p></div>",
@@ -167,12 +187,18 @@ if run_button and query:
             st.subheader(":red[Investigation Summary]", anchor=None, divider="gray")
         summary_slot = st.empty()
 
-    # 6d) Inject your two callbacks and invoke exactly as before
+    # 6d) Streaming vs final-only based on low-bandwidth mode
     with status_slot.container():
         with st.spinner("✍️ Generating summary..."):
-            stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
-            llm.callbacks = [stream_handler]
-            _ = generate_summary(llm, query, st.session_state.scraped)
+            if low_bandwidth:
+                # Disable streaming updates; show final summary once
+                summary_text = generate_summary(llm, query, st.session_state.scraped)
+                st.session_state.streamed_summary = summary_text
+                summary_slot.markdown(summary_text)
+            else:
+                stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
+                llm.callbacks = [stream_handler]
+                _ = generate_summary(llm, query, st.session_state.scraped)
 
     with btn_col:
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")

@@ -10,3 +10,11 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Low-resource / low-bandwidth mode
+# Enable by setting LOW_RESOURCE_MODE=1 in environment
+LOW_RESOURCE_MODE = os.getenv("LOW_RESOURCE_MODE", "0") == "1"
+# Optional tuning knobs (with safe defaults)
+LOW_RESOURCE_THREADS = int(os.getenv("LOW_RESOURCE_THREADS", "2"))
+LOW_RESOURCE_MAX_ENDPOINTS = int(os.getenv("LOW_RESOURCE_MAX_ENDPOINTS", "3"))
+LOW_RESOURCE_SCRAPE_MAX_CHARS = int(os.getenv("LOW_RESOURCE_SCRAPE_MAX_CHARS", "800"))

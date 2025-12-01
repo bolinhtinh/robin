@@ -106,6 +106,28 @@ Example commands:
 
 ---
 
+## Low-Resource / Low-Bandwidth Mode
+
+If your network or machine is constrained, enable the lightweight mode:
+
+- Set an environment variable before running:
+
+```bash
+export LOW_RESOURCE_MODE=1
+# Optional tuning (defaults shown):
+export LOW_RESOURCE_THREADS=2
+export LOW_RESOURCE_MAX_ENDPOINTS=3
+export LOW_RESOURCE_SCRAPE_MAX_CHARS=800
+```
+
+- In the Web UI, you can also toggle "Low-bandwidth mode" in the sidebar. This:
+  - Limits the number of search engines queried
+  - Caps scraping threads
+  - Reduces scraped text length sent to the LLM
+  - Disables token streaming (sends a single final summary to the browser)
+
+---
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

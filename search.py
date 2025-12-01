@@ -2,6 +2,8 @@ import requests
 import random, re
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, List
+from config import LOW_RESOURCE_MODE, LOW_RESOURCE_MAX_ENDPOINTS
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -66,14 +68,26 @@ def fetch_search_results(endpoint, query):
             return links
         else:
             return []
-    except:
+    except Exception:
+    except Exception:
         return []
 
-def get_search_results(refined_query, max_workers=5):
+def get_search_results(refined_query: str, max_workers: int = 5, max_endpoints: Optional[int] = None) -> List[dict]:
+    """
+    Query multiple dark web search engines and aggregate unique results.
+    When low-resource mode is enabled and max_endpoints is not provided, limit the
+    number of engines to reduce overall network usage.
+    """
+    endpoints = SEARCH_ENGINE_ENDPOINTS
+    if max_endpoints is None and LOW_RESOURCE_MODE:
+        max_endpoints = LOW_RESOURCE_MAX_ENDPOINTS
+    if isinstance(max_endpoints, int) and max_endpoints > 0:
+        endpoints = endpoints[:max_endpoints]
+
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = [executor.submit(fetch_search_results, endpoint, refined_query)
-                   for endpoint in SEARCH_ENGINE_ENDPOINTS]
+                   for endpoint in endpoints]
         for future in as_completed(futures):
             result_urls = future.result()
             results.extend(result_urls)

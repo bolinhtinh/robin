@@ -6,7 +6,7 @@ from typing import Callable, Optional, List
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.callbacks.base import BaseCallbackHandler
-from config import OLLAMA_BASE_URL, OPENROUTER_BASE_URL, OPENROUTER_API_KEY, GOOGLE_API_KEY
+from config import OLLAMA_BASE_URL, OPENROUTER_BASE_URL, OPENROUTER_API_KEY, GOOGLE_API_KEY, LOW_RESOURCE_MODE
 
 
 class BufferedStreamingHandler(BaseCallbackHandler):
@@ -33,12 +33,12 @@ class BufferedStreamingHandler(BaseCallbackHandler):
 
 # --- Configuration Data ---
 # Instantiate common dependencies once
-_common_callbacks = [BufferedStreamingHandler(buffer_limit=60)]
+_common_callbacks = [] if LOW_RESOURCE_MODE else [BufferedStreamingHandler(buffer_limit=60)]
 
 # Define common parameters for most LLMs
 _common_llm_params = {
     "temperature": 0,
-    "streaming": True,
+    "streaming": False if LOW_RESOURCE_MODE else True,
     "callbacks": _common_callbacks,
 }
 
