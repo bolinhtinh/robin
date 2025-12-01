@@ -130,7 +130,7 @@ export LOW_RESOURCE_SCRAPE_MAX_CHARS=800
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Contributions are welcome! Please feel free to submit a Pull Request if you have major feature updates.
 
 - Fork the repository
 - Create your feature branch (git checkout -b feature/amazing-feature)
@@ -142,6 +142,7 @@ Open an Issue for any of these situations:
 - If you spot a bug or bad code
 - If you have a feature request idea
 - If you have questions or doubts about usage
+- If you have minor code changes
 
 ---
 
@@ -152,6 +153,7 @@ Open an Issue for any of these situations:
 - LLM Prompt inspiration from [OSINT-Assistant](https://github.com/AXRoux/OSINT-Assistant) repository.
 - Logo Design by my friend [Tanishq Rupaal](https://github.com/Tanq16/)
 - Workflow Design by [Chintan Gurjar](https://www.linkedin.com/in/chintangurjar)
+
 
 
 
