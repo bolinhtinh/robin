@@ -8,6 +8,20 @@ from llm import get_llm, refine_query, filter_results, generate_summary
 from config import LOW_RESOURCE_MODE, LOW_RESOURCE_THREADS, LOW_RESOURCE_MAX_ENDPOINTS
 
 
+# Server-side summary caches
+@st.cache_resource
+def get_summary_cache_dict():
+    # Simple in-process cache for streaming path (fast key lookup)
+    return {}
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def cached_generate_summary(model_name: str, query: str, scraped: dict, prompt_signature: str = "v1") -> str:
+    # Build a fresh non-UI LLM instance; output is cached by Streamlit
+    llm = get_llm(model_name)
+    return generate_summary(llm, query, scraped)
+
+
 # Cache expensive backend calls
 @st.cache_data(ttl=200, show_spinner=False)
 def cached_search_results(refined_query: str, threads: int, max_endpoints: int | None):
@@ -125,10 +139,6 @@ summary_container_placeholder = st.empty()
 
 # Process the query
 if run_button and query:
-    # clear old state
-    for k in ["refined", "results", "filtered", "scraped", "streamed_summary"]:
-        st.session_state.pop(k, None)
-
     # Stage 1 - Load LLM
     with status_slot.container():
         with st.spinner("🔄 Loading LLM..."):
@@ -137,49 +147,50 @@ if run_button and query:
     # Stage 2 - Refine query
     with status_slot.container():
         with st.spinner("🔄 Refining query..."):
-            st.session_state.refined = refine_query(llm, query)
+            refined = refine_query(llm, query)
     p1.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Refined Query</p><p>{st.session_state.refined}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>Refined Query</p><p>{refined}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 3 - Search dark web
     with status_slot.container():
         with st.spinner("🔍 Searching dark web..."):
-            st.session_state.results = cached_search_results(
-                st.session_state.refined, threads, max_endpoints
+            results = cached_search_results(
+                refined, threads, max_endpoints
             )
     p2.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(st.session_state.results)}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(results)}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 4 - Filter results
     with status_slot.container():
         with st.spinner("🗂️ Filtering results..."):
-            st.session_state.filtered = filter_results(
-                llm, st.session_state.refined, st.session_state.results
+            filtered = filter_results(
+                llm, refined, results
             )
     p3.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Filtered Results</p><p>{len(st.session_state.filtered)}</p></div>",
+        f"<div class='colHeight'><p class='pTitle'>Filtered Results</p><p>{len(filtered)}</p></div>",
         unsafe_allow_html=True,
     )
 
     # Stage 5 - Scrape content
     with status_slot.container():
         with st.spinner("📜 Scraping content..."):
-            st.session_state.scraped = cached_scrape_multiple(
-                st.session_state.filtered, threads
+            scraped = cached_scrape_multiple(
+                filtered, threads
             )
 
     # Stage 6 - Summarize
-    # 6a) Prepare session state for streaming text
-    st.session_state.streamed_summary = ""
+    # 6a) Prepare local accumulator for streaming text
+    summary_text_accum = ""
 
     # 6c) UI callback for each chunk
     def ui_emit(chunk: str):
-        st.session_state.streamed_summary += chunk
-        summary_slot.markdown(st.session_state.streamed_summary)
+        nonlocal summary_text_accum
+        summary_text_accum += chunk
+        summary_slot.markdown(summary_text_accum)
 
     with summary_container_placeholder.container():  # border=True, height=450):
         hdr_col, btn_col = st.columns([4, 1], vertical_alignment="center")
@@ -190,20 +201,46 @@ if run_button and query:
     # 6d) Streaming vs final-only based on low-bandwidth mode
     with status_slot.container():
         with st.spinner("✍️ Generating summary..."):
+            # Build cache key based on model, query, and scraped content
+            import hashlib, json
+            cache_key_payload = {
+                "model": model,
+                "query": query,
+                # Sort keys for deterministic hashing
+                "scraped": {k: scraped[k] for k in sorted(scraped.keys())},
+                "prompt_ver": "v1",
+            }
+            cache_key = hashlib.sha256(json.dumps(cache_key_payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+            # Try fast in-process cache first
+            summary_cache = get_summary_cache_dict()
+            cached_text = summary_cache.get(cache_key)
+
             if low_bandwidth:
-                # Disable streaming updates; show final summary once
-                summary_text = generate_summary(llm, query, st.session_state.scraped)
-                st.session_state.streamed_summary = summary_text
-                summary_slot.markdown(summary_text)
+                # Disable streaming; prefer cached result or compute via server-side cache
+                if cached_text is None:
+                    summary_text_accum = cached_generate_summary(model, query, scraped, "v1")
+                    summary_cache[cache_key] = summary_text_accum
+                else:
+                    summary_text_accum = cached_text
+                summary_slot.markdown(summary_text_accum)
             else:
-                stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
-                llm.callbacks = [stream_handler]
-                _ = generate_summary(llm, query, st.session_state.scraped)
+                if cached_text is not None:
+                    # If we have a cache hit, use it directly (no streaming needed)
+                    summary_text_accum = cached_text
+                    summary_slot.markdown(summary_text_accum)
+                else:
+                    # Stream first-run for better UX; store result after finish
+                    stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
+                    llm.callbacks = [stream_handler]
+                    _ = generate_summary(llm, query, scraped)
+                    # After streaming completes, persist to fast cache
+                    summary_cache[cache_key] = summary_text_accum
 
     with btn_col:
         now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         fname = f"summary_{now}.md"
-        b64 = base64.b64encode(st.session_state.streamed_summary.encode()).decode()
+        b64 = base64.b64encode(summary_text_accum.encode()).decode()
         href = f'<div class="aStyle">📥 <a href="data:file/markdown;base64,{b64}" download="{fname}">Download</a></div>'
         st.markdown(href, unsafe_allow_html=True)
     status_slot.success("✔️ Pipeline completed successfully!")

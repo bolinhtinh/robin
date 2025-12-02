@@ -6,21 +6,28 @@ from typing import Callable, Optional, List
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.callbacks.base import BaseCallbackHandler
+import time
 from config import OLLAMA_BASE_URL, OPENROUTER_BASE_URL, OPENROUTER_API_KEY, GOOGLE_API_KEY, LOW_RESOURCE_MODE
 
 
 class BufferedStreamingHandler(BaseCallbackHandler):
-    def __init__(self, buffer_limit: int = 60, ui_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, buffer_limit: int = 60, ui_callback: Optional[Callable[[str], None]] = None, min_emit_interval_seconds: float = 0.2):
         self.buffer = ""
         self.buffer_limit = buffer_limit
         self.ui_callback = ui_callback
+        self.min_emit_interval_seconds = min_emit_interval_seconds
+        self._last_emit_time = time.monotonic()
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         self.buffer += token
-        if "\n" in token or len(self.buffer) >= self.buffer_limit:
+        should_flush = "\n" in token or len(self.buffer) >= self.buffer_limit
+        if should_flush:
             print(self.buffer, end="", flush=True)
             if self.ui_callback:
-                self.ui_callback(self.buffer)
+                now = time.monotonic()
+                if (now - self._last_emit_time) >= self.min_emit_interval_seconds:
+                    self.ui_callback(self.buffer)
+                    self._last_emit_time = now
             self.buffer = ""
 
     def on_llm_end(self, response, **kwargs) -> None:
