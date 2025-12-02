@@ -111,11 +111,32 @@ threads = st.sidebar.slider(
 )
 max_endpoints = LOW_RESOURCE_MAX_ENDPOINTS if low_bandwidth else None
 
+# Additional performance toggles
+minimal_ui = st.sidebar.checkbox(
+    "Minimal UI (hide banners/cards)", value=low_bandwidth, help="Hide logo and step cards to reduce DOM work."
+)
+plain_text_summary = st.sidebar.checkbox(
+    "Plain text summary (faster)", value=low_bandwidth, help="Render summary as plain text (no markdown parsing)."
+)
+if not low_bandwidth:
+    stream_interval_ms = st.sidebar.slider(
+        "Streaming update interval (ms)",
+        min_value=100,
+        max_value=1000,
+        value=400,
+        step=50,
+        help="Higher values reduce UI update frequency and browser load.",
+        key="stream_interval_ms",
+    )
+else:
+    stream_interval_ms = 600
+
 
 # Main UI - logo and input
-_, logo_col, _ = st.columns(3)
-with logo_col:
-    st.image(".github/assets/robin_logo.png", width=200)
+if not minimal_ui:
+    _, logo_col, _ = st.columns(3)
+    with logo_col:
+        st.image(".github/assets/robin_logo.png", width=200)
 
 # Display text box and button
 with st.form("search_form", clear_on_submit=True):
@@ -148,10 +169,11 @@ if run_button and query:
     with status_slot.container():
         with st.spinner("🔄 Refining query..."):
             refined = refine_query(llm, query)
-    p1.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Refined Query</p><p>{refined}</p></div>",
-        unsafe_allow_html=True,
-    )
+    if not minimal_ui:
+        p1.container(border=True).markdown(
+            f"<div class='colHeight'><p class='pTitle'>Refined Query</p><p>{refined}</p></div>",
+            unsafe_allow_html=True,
+        )
 
     # Stage 3 - Search dark web
     with status_slot.container():
@@ -159,10 +181,11 @@ if run_button and query:
             results = cached_search_results(
                 refined, threads, max_endpoints
             )
-    p2.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(results)}</p></div>",
-        unsafe_allow_html=True,
-    )
+    if not minimal_ui:
+        p2.container(border=True).markdown(
+            f"<div class='colHeight'><p class='pTitle'>Search Results</p><p>{len(results)}</p></div>",
+            unsafe_allow_html=True,
+        )
 
     # Stage 4 - Filter results
     with status_slot.container():
@@ -170,10 +193,11 @@ if run_button and query:
             filtered = filter_results(
                 llm, refined, results
             )
-    p3.container(border=True).markdown(
-        f"<div class='colHeight'><p class='pTitle'>Filtered Results</p><p>{len(filtered)}</p></div>",
-        unsafe_allow_html=True,
-    )
+    if not minimal_ui:
+        p3.container(border=True).markdown(
+            f"<div class='colHeight'><p class='pTitle'>Filtered Results</p><p>{len(filtered)}</p></div>",
+            unsafe_allow_html=True,
+        )
 
     # Stage 5 - Scrape content
     with status_slot.container():
@@ -190,7 +214,10 @@ if run_button and query:
     def ui_emit(chunk: str):
         nonlocal summary_text_accum
         summary_text_accum += chunk
-        summary_slot.markdown(summary_text_accum)
+        if plain_text_summary:
+            summary_slot.text(summary_text_accum)
+        else:
+            summary_slot.markdown(summary_text_accum)
 
     with summary_container_placeholder.container():  # border=True, height=450):
         hdr_col, btn_col = st.columns([4, 1], vertical_alignment="center")
@@ -223,15 +250,24 @@ if run_button and query:
                     summary_cache[cache_key] = summary_text_accum
                 else:
                     summary_text_accum = cached_text
-                summary_slot.markdown(summary_text_accum)
+                if plain_text_summary:
+                    summary_slot.text(summary_text_accum)
+                else:
+                    summary_slot.markdown(summary_text_accum)
             else:
                 if cached_text is not None:
                     # If we have a cache hit, use it directly (no streaming needed)
                     summary_text_accum = cached_text
-                    summary_slot.markdown(summary_text_accum)
+                    if plain_text_summary:
+                        summary_slot.text(summary_text_accum)
+                    else:
+                        summary_slot.markdown(summary_text_accum)
                 else:
                     # Stream first-run for better UX; store result after finish
-                    stream_handler = BufferedStreamingHandler(ui_callback=ui_emit)
+                    stream_handler = BufferedStreamingHandler(
+                        ui_callback=ui_emit,
+                        min_emit_interval_seconds=max(0.1, stream_interval_ms / 1000.0),
+                    )
                     llm.callbacks = [stream_handler]
                     _ = generate_summary(llm, query, scraped)
                     # After streaming completes, persist to fast cache
